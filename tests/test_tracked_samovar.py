@@ -14,7 +14,7 @@
 
 import unittest
 
-from tracked_samovar import (
+from tracked_samovar.tracked_samovar import (
     CrazyVehicleError,
     SamovarCannotFly,
     SamovarError,
