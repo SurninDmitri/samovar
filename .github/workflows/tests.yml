@@ -1,0 +1,28 @@
+# .github/workflows/tests.yml
+# Запускает тесты из tests/ на каждый push и pull request.
+# Если хотя бы один тест упал (или модуль tracked_samovar не найден) — красный крестик,
+# если все прошли — зелёная галочка.
+
+name: Tests
+
+on:
+  push:                 # любой push в любую ветку
+  pull_request:         # любой PR в этот репозиторий
+  workflow_dispatch:    # кнопка «Run workflow» во вкладке Actions
+
+jobs:
+  unittest:
+    name: unittest
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Скачать код репозитория
+        uses: actions/checkout@v5
+
+      - name: Установить Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Запустить тесты
+        run: python -m unittest discover -s tests -v
