@@ -27,7 +27,10 @@ from tracked_samovar.tracked_samovar import (
     TrackedSamovar,
 )
 
-PLACES = 7  # точность сравнения float (см. SPEC, раздел 3.3)
+PLACES = 7  # точность сравнения float (см. SPEC, раздел 3.0)
+NAN = float("nan")
+INF = float("inf")
+HUGE_INT = 10**400  # не переводится во float без переполнения
 
 DOMAIN_EXCEPTIONS = (
     SamovarCannotFly,
@@ -51,6 +54,13 @@ def make_samovar(**overrides):
     }
     params.update(overrides)
     return TrackedSamovar(**params)
+
+
+def shown(value):
+    """Короткая подпись для subTest: 10**400 не печатается целиком."""
+    if isinstance(value, tuple):
+        return tuple(shown(item) for item in value)
+    return "10**400" if value is HUGE_INT else value
 
 
 def snapshot(samovar):
@@ -155,6 +165,18 @@ class TestConstructor(unittest.TestCase):
                     make_samovar(steam=steam).steam, float(steam), places=PLACES
                 )
 
+        # подклассы int и float считаются числами и приводятся к float
+        class Kilograms(float):
+            pass
+
+        class Kmh(int):
+            pass
+
+        converted = TrackedSamovar("Пыхтун", Kilograms(800.0), 1.2, Kmh(20))
+        self.assertIs(type(converted.mass_kg), float)
+        self.assertIs(type(converted.max_speed_kmh), float)
+        self.assertAlmostEqual(converted.max_speed_kmh, 20.0, places=PLACES)
+
     def test_tc02_init_empty_name_raises(self):
         """TC-02: пустое имя или имя из пробелов -> ValueError."""
         for name in ("", "   ", "\t\n"):
@@ -163,16 +185,16 @@ class TestConstructor(unittest.TestCase):
                     make_samovar(name=name)
 
     def test_tc03_init_nonpositive_dimensions_raise(self):
-        """TC-03: mass_kg, track_width_m, max_speed_kmh <= 0 -> ValueError."""
+        """TC-03: mass_kg, track_width_m, max_speed_kmh <= 0 или неконечны -> ValueError."""
         for param in ("mass_kg", "track_width_m", "max_speed_kmh"):
-            for value in (0, 0.0, -1.0):
-                with self.subTest(param=param, value=value):
+            for value in (0, 0.0, -1.0, NAN, INF, -INF, HUGE_INT):
+                with self.subTest(param=param, value=shown(value)):
                     with self.assertRaises(ValueError):
                         make_samovar(**{param: value})
 
     def test_tc04_init_steam_out_of_range_raises(self):
-        """TC-04: steam вне диапазона 0…100 -> ValueError."""
-        for steam in (-0.1, 100.1, 1000):
+        """TC-04: steam вне диапазона 0…100 или неконечен -> ValueError."""
+        for steam in (-0.1, 100.1, 1000, NAN, INF, -INF):
             with self.subTest(steam=steam):
                 with self.assertRaises(ValueError):
                     make_samovar(steam=steam)
@@ -248,13 +270,17 @@ class TestMove(unittest.TestCase):
             ((-5, "ground"), ValueError),
             ((1, "lava"), ValueError),
             ((1, ""), ValueError),
+            ((NAN, "ground"), ValueError),
+            ((INF, "ground"), ValueError),
+            ((-INF, "ground"), ValueError),
+            ((HUGE_INT, "ground"), ValueError),
             (("abc", "ground"), TypeError),
             ((True, "ground"), TypeError),
             ((None, "ground"), TypeError),
             ((1, 1), TypeError),
         ]
         for args, exc in cases:
-            with self.subTest(args=args):
+            with self.subTest(args=shown(args)):
                 # Arrange
                 samovar = make_samovar()
                 before = snapshot(samovar)
@@ -272,7 +298,7 @@ class TestMove(unittest.TestCase):
             ((0.5000001, "water"), SamovarWouldSink),
         ]
         for args, exc in cases:
-            with self.subTest(args=args):
+            with self.subTest(args=shown(args)):
                 # Arrange
                 samovar = make_samovar()
                 before = snapshot(samovar)
@@ -348,6 +374,8 @@ class TestCalculateSteam(unittest.TestCase):
 
         errors = [
             ((0, "ground"), ValueError),
+            ((NAN, "ground"), ValueError),
+            ((INF, "sand"), ValueError),
             ((1, "lava"), ValueError),
             (("1", "ground"), TypeError),
             ((1, "air"), SamovarCannotFly),
@@ -516,7 +544,7 @@ class TestTea(unittest.TestCase):
 class TestRefuel(unittest.TestCase):
 
     def test_tc20_refuel(self):
-        """TC-20: refuel пополняет пар, но не выше 100; проверяет аргументы."""
+        """TC-20: refuel пополняет пар, но не выше 100; при полном запасе без ошибки; проверяет аргументы."""
         # Arrange
         samovar = make_samovar(steam=20.0)
 
@@ -528,9 +556,16 @@ class TestRefuel(unittest.TestCase):
         capped.refuel(1000)
         self.assertAlmostEqual(capped.steam, 100.0, places=PLACES)
 
+        full = make_samovar(steam=100.0)
+        before_full = snapshot(full)
+        self.assertIsNone(full.refuel(5))
+        self.assertEqual(snapshot(full), before_full)
+
         for amount, exc in ((0, ValueError), (-1, ValueError),
+                            (NAN, ValueError), (INF, ValueError),
+                            (-INF, ValueError), (HUGE_INT, ValueError),
                             ("10", TypeError), (True, TypeError), (None, TypeError)):
-            with self.subTest(amount=amount):
+            with self.subTest(amount=shown(amount)):
                 before = snapshot(samovar)
                 with self.assertRaises(exc):
                     samovar.refuel(amount)
